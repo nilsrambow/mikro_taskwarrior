@@ -240,8 +240,15 @@ function M.mark_task_done_by_id(display_id)
 
   -- Filter out completed tasks to calculate display IDs
   for _, task in ipairs(tasks) do
-    if task.status ~= "completed" then table.insert(open_tasks, task) end
+    if task.status ~= "completed" then
+      -- Calculate urgency for each task (same as list_tasks)
+      task.urgency = urgency.calculate_urgency(task)
+      table.insert(open_tasks, task)
+    end
   end
+
+  -- Sort by urgency (highest first) - same as list_tasks
+  table.sort(open_tasks, function(a, b) return (a.urgency or 0) > (b.urgency or 0) end)
 
   -- Check if display_id is valid
   if display_id < 1 or display_id > #open_tasks then
