@@ -73,5 +73,23 @@ function M.parse_due_date(args)
   return nil
 end
 
+-- Function to check if a task is due today
+function M.is_due_today(due_date)
+  if not due_date then return false end
+  local today = os.date "%Y-%m-%d"
+  return due_date == today
+end
+
+-- Function to check if a task is overdue
+function M.is_overdue(due_date)
+  if not due_date then return false end
+  local year, month, day = due_date:match "(%d%d%d%d)%-(%d%d)%-(%d%d)"
+  if not year then return false end
+  
+  local due_time = os.time { year = tonumber(year), month = tonumber(month), day = tonumber(day), hour = 23, min = 59, sec = 59 }
+  local now = os.time()
+  return now > due_time
+end
+
 return M
 

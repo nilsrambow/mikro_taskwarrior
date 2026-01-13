@@ -135,7 +135,8 @@ function M.list_tasks(filter_tags, exclude_tags, task_id)
     .. string.rep("-", desc_width)
   table.insert(lines, separator)
 
-  -- Task rows
+  -- Task rows - track line numbers for highlighting
+  local task_line_map = {} -- Maps line number (0-indexed) to task object
   for i, task in ipairs(open_tasks) do
     -- Calculate age (simplified)
     local age = "0d"
@@ -182,6 +183,8 @@ function M.list_tasks(filter_tags, exclude_tags, task_id)
       .. " "
       .. string_utils.pad_string(desc, desc_width)
     table.insert(lines, row)
+    -- Map line number to task (header at 0, separator at 1, tasks start at 2)
+    task_line_map[#lines - 1] = task
   end
 
   -- Footer with count and filter info
@@ -196,7 +199,7 @@ function M.list_tasks(filter_tags, exclude_tags, task_id)
     table.insert(lines, string.format("%d tasks", #open_tasks))
   end
 
-  window.create_float_window(lines)
+  window.create_float_window(lines, task_line_map)
 end
 
 -- Function to add a new task

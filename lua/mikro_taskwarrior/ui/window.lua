@@ -1,7 +1,10 @@
+local date_utils = require "mikro_taskwarrior.utils.date"
+
 local M = {}
 
 -- Function to create a centered floating window
-function M.create_float_window(lines)
+-- tasks: optional table mapping line numbers (0-indexed) to task objects for highlighting
+function M.create_float_window(lines, tasks)
   -- Set width to 80% of screen width
   local width = math.floor(vim.o.columns * 0.8)
   local height = math.min(#lines + 2, vim.o.lines - 4)
@@ -49,6 +52,30 @@ function M.create_float_window(lines)
 
   for _, keymap in ipairs(keymaps) do
     vim.api.nvim_buf_set_keymap(buf, keymap[1], keymap[2], keymap[3], keymap[4])
+  end
+
+  -- Define highlight groups if they don't exist
+  vim.api.nvim_set_hl(0, "TaskwarriorDueToday", { fg = "#ff8800", bold = true }) -- Orange
+  vim.api.nvim_set_hl(0, "TaskwarriorOverdue", { fg = "#ff0000", bold = true }) -- Red
+
+  -- Apply color coding based on due dates
+  if tasks then
+    local ns_id = vim.api.nvim_create_namespace("mikro_taskwarrior")
+    for line_num, task in pairs(tasks) do
+      if task.due then
+        local hl_group = nil
+        if date_utils.is_overdue(task.due) then
+          hl_group = "TaskwarriorOverdue"
+        elseif date_utils.is_due_today(task.due) then
+          hl_group = "TaskwarriorDueToday"
+        end
+        
+        if hl_group then
+          -- Highlight the entire line
+          vim.api.nvim_buf_add_highlight(buf, ns_id, hl_group, line_num, 0, -1)
+        end
+      end
+    end
   end
 
   return buf, win
