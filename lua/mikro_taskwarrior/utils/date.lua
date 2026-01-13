@@ -1,86 +1,105 @@
 local M = {}
 
--- Function to get current timestamp in ISO 8601 format
+---Get current timestamp in ISO 8601 format
+---@return string ISO 8601 timestamp
 function M.get_current_timestamp() return os.date "%Y%m%dT%H%M%SZ" end
 
--- Function to parse due date from command
+---Parse a single due date string (without "due:" prefix)
+---@param due_str string|nil Date string (e.g., "today", "tomorrow", "1w", "2024-12-25")
+---@return string|nil Formatted date string in YYYY-MM-DD format, or nil if invalid
+function M.parse_due_date_from_string(due_str)
+  if not due_str then return nil end
+  
+  due_str = due_str:lower()
+
+  -- Handle smart date keywords
+  if due_str == "today" then
+    return os.date "%Y-%m-%d"
+  elseif due_str == "tomorrow" then
+    return os.date("%Y-%m-%d", os.time() + 86400)
+  elseif due_str:match "^%d+d$" then
+    -- Relative days: 1d, 5d, 30d
+    local days = tonumber(due_str:match "^(%d+)d$")
+    return os.date("%Y-%m-%d", os.time() + days * 86400)
+  elseif due_str:match "^%d+w$" then
+    -- Relative weeks: 1w, 2w, 4w
+    local weeks = tonumber(due_str:match "^(%d+)w$")
+    return os.date("%Y-%m-%d", os.time() + weeks * 7 * 86400)
+  elseif due_str:match "^%d+m$" then
+    -- Relative months: 1m, 2m, 6m (approximate as 30 days)
+    local months = tonumber(due_str:match "^(%d+)m$")
+    return os.date("%Y-%m-%d", os.time() + months * 30 * 86400)
+  elseif due_str == "monday" or due_str == "mon" then
+    local current_day = tonumber(os.date "%u") -- 1=Mon, 7=Sun
+    local days_until = (8 - current_day) % 7
+    if days_until == 0 then days_until = 7 end
+    return os.date("%Y-%m-%d", os.time() + days_until * 86400)
+  elseif due_str == "tuesday" or due_str == "tue" then
+    local current_day = tonumber(os.date "%u")
+    local days_until = (9 - current_day) % 7
+    if days_until == 0 then days_until = 7 end
+    return os.date("%Y-%m-%d", os.time() + days_until * 86400)
+  elseif due_str == "wednesday" or due_str == "wed" then
+    local current_day = tonumber(os.date "%u")
+    local days_until = (10 - current_day) % 7
+    if days_until == 0 then days_until = 7 end
+    return os.date("%Y-%m-%d", os.time() + days_until * 86400)
+  elseif due_str == "thursday" or due_str == "thu" then
+    local current_day = tonumber(os.date "%u")
+    local days_until = (11 - current_day) % 7
+    if days_until == 0 then days_until = 7 end
+    return os.date("%Y-%m-%d", os.time() + days_until * 86400)
+  elseif due_str == "friday" or due_str == "fri" then
+    local current_day = tonumber(os.date "%u")
+    local days_until = (12 - current_day) % 7
+    if days_until == 0 then days_until = 7 end
+    return os.date("%Y-%m-%d", os.time() + days_until * 86400)
+  elseif due_str == "saturday" or due_str == "sat" then
+    local current_day = tonumber(os.date "%u")
+    local days_until = (13 - current_day) % 7
+    if days_until == 0 then days_until = 7 end
+    return os.date("%Y-%m-%d", os.time() + days_until * 86400)
+  elseif due_str == "sunday" or due_str == "sun" then
+    local current_day = tonumber(os.date "%u")
+    local days_until = (14 - current_day) % 7
+    if days_until == 0 then days_until = 7 end
+    return os.date("%Y-%m-%d", os.time() + days_until * 86400)
+  elseif due_str:match "^%d%d%d%d%-%d%d?%-%d%d?$" then
+    -- Regular date format YYYY-MM-DD
+    local year, month, day = due_str:match "^(%d+)%-(%d+)%-(%d+)$"
+    if year and month and day then
+      return string.format("%s-%s-%s", year, month:gsub("^%d$", "0%1"), day:gsub("^%d$", "0%1"))
+    end
+  end
+  
+  return nil
+end
+
+---Parse due date from command args
+---@param args string[] Command arguments
+---@return string|nil Formatted date string in YYYY-MM-DD format, or nil if not found
 function M.parse_due_date(args)
   for i, arg in ipairs(args) do
     if arg:lower():match "^due:" then
       local due_str = arg:lower():gsub("due:", "")
-
-      -- Handle smart date keywords
-      if due_str == "today" then
-        return os.date "%Y-%m-%d"
-      elseif due_str == "tomorrow" then
-        return os.date("%Y-%m-%d", os.time() + 86400)
-      elseif due_str:match "^%d+d$" then
-        -- Relative days: 1d, 5d, 30d
-        local days = tonumber(due_str:match "^(%d+)d$")
-        return os.date("%Y-%m-%d", os.time() + days * 86400)
-      elseif due_str:match "^%d+w$" then
-        -- Relative weeks: 1w, 2w, 4w
-        local weeks = tonumber(due_str:match "^(%d+)w$")
-        return os.date("%Y-%m-%d", os.time() + weeks * 7 * 86400)
-      elseif due_str:match "^%d+m$" then
-        -- Relative months: 1m, 2m, 6m (approximate as 30 days)
-        local months = tonumber(due_str:match "^(%d+)m$")
-        return os.date("%Y-%m-%d", os.time() + months * 30 * 86400)
-      elseif due_str == "monday" or due_str == "mon" then
-        local current_day = tonumber(os.date "%u") -- 1=Mon, 7=Sun
-        local days_until = (8 - current_day) % 7
-        if days_until == 0 then days_until = 7 end
-        return os.date("%Y-%m-%d", os.time() + days_until * 86400)
-      elseif due_str == "tuesday" or due_str == "tue" then
-        local current_day = tonumber(os.date "%u")
-        local days_until = (9 - current_day) % 7
-        if days_until == 0 then days_until = 7 end
-        return os.date("%Y-%m-%d", os.time() + days_until * 86400)
-      elseif due_str == "wednesday" or due_str == "wed" then
-        local current_day = tonumber(os.date "%u")
-        local days_until = (10 - current_day) % 7
-        if days_until == 0 then days_until = 7 end
-        return os.date("%Y-%m-%d", os.time() + days_until * 86400)
-      elseif due_str == "thursday" or due_str == "thu" then
-        local current_day = tonumber(os.date "%u")
-        local days_until = (11 - current_day) % 7
-        if days_until == 0 then days_until = 7 end
-        return os.date("%Y-%m-%d", os.time() + days_until * 86400)
-      elseif due_str == "friday" or due_str == "fri" then
-        local current_day = tonumber(os.date "%u")
-        local days_until = (12 - current_day) % 7
-        if days_until == 0 then days_until = 7 end
-        return os.date("%Y-%m-%d", os.time() + days_until * 86400)
-      elseif due_str == "saturday" or due_str == "sat" then
-        local current_day = tonumber(os.date "%u")
-        local days_until = (13 - current_day) % 7
-        if days_until == 0 then days_until = 7 end
-        return os.date("%Y-%m-%d", os.time() + days_until * 86400)
-      elseif due_str == "sunday" or due_str == "sun" then
-        local current_day = tonumber(os.date "%u")
-        local days_until = (14 - current_day) % 7
-        if days_until == 0 then days_until = 7 end
-        return os.date("%Y-%m-%d", os.time() + days_until * 86400)
-      elseif due_str:match "^%d%d%d%d%-%d%d?%-%d%d?$" then
-        -- Regular date format YYYY-MM-DD
-        local year, month, day = due_str:match "^(%d+)%-(%d+)%-(%d+)$"
-        if year and month and day then
-          return string.format("%s-%s-%s", year, month:gsub("^%d$", "0%1"), day:gsub("^%d$", "0%1"))
-        end
-      end
+      return M.parse_due_date_from_string(due_str)
     end
   end
   return nil
 end
 
--- Function to check if a task is due today
+---Check if a task is due today
+---@param due_date string|nil Date in YYYY-MM-DD format
+---@return boolean
 function M.is_due_today(due_date)
   if not due_date then return false end
   local today = os.date "%Y-%m-%d"
   return due_date == today
 end
 
--- Function to check if a task is overdue
+---Check if a task is overdue
+---@param due_date string|nil Date in YYYY-MM-DD format
+---@return boolean
 function M.is_overdue(due_date)
   if not due_date then return false end
   local year, month, day = due_date:match "(%d%d%d%d)%-(%d%d)%-(%d%d)"
