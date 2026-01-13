@@ -1,7 +1,6 @@
 local task = require "mikro_taskwarrior.core.task"
 local date_utils = require "mikro_taskwarrior.utils.date"
 local string_utils = require "mikro_taskwarrior.utils.string"
-local config = require "mikro_taskwarrior.config"
 
 local M = {}
 
@@ -14,7 +13,7 @@ function M.setup()
     local cmd_index = nil
     local cmd = nil
     for i, arg in ipairs(args) do
-      if arg == "list" or arg == "add" or arg == "modify" or arg == "done" or arg == "info" then
+      if arg == "list" or arg == "add" or arg == "modify" or arg == "done" then
         cmd_index = i
         cmd = arg
         break
@@ -164,20 +163,13 @@ function M.setup()
         return
       end
       task.mark_task_done_by_id(task_id)
-    elseif cmd == "info" then
-      -- Expand ~ to home directory for display
-      local display_path = config.TASKS_FILE
-      if display_path:match "^~" then
-        display_path = vim.fn.expand(display_path)
-      end
-      print(string.format("Tasks file: %s", display_path))
     else
-      print "Usage: :Task [+tag] [-tag] [<id>] list|add <description>|modify [due:YYYY-MM-DD] [+tag] [-tag]|<id> done|info"
+      print "Usage: :Task [+tag] [-tag] [<id>] list|add <description>|modify [due:YYYY-MM-DD] [+tag] [-tag]|<id> done"
     end
   end, {
     nargs = "+",
     complete = function(arglead, cmdline, cursorpos)
-      local commands = { "list", "add", "modify", "done", "info" }
+      local commands = { "list", "add", "modify", "done" }
       return vim.tbl_filter(function(val) return vim.startswith(val, arglead) end, commands)
     end,
   })

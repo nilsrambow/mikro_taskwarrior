@@ -195,14 +195,6 @@ function M.list_tasks(filter_tags, exclude_tags, task_id)
   else
     table.insert(lines, string.format("%d tasks", #open_tasks))
   end
-  
-  -- Show tasks file path
-  local config = require "mikro_taskwarrior.config"
-  local display_path = config.TASKS_FILE
-  if display_path:match "^~" then
-    display_path = vim.fn.expand(display_path)
-  end
-  table.insert(lines, string.format("Tasks file: %s", display_path))
 
   window.create_float_window(lines)
 end
