@@ -80,6 +80,13 @@ function M.validate_task(task)
     end
   end
   
+  -- Validate id field if present (optional for backward compatibility)
+  if task.id ~= nil then
+    if type(task.id) ~= "number" or task.id < 1 then
+      return false, string.format("Invalid task ID: %s (must be a positive number)", tostring(task.id))
+    end
+  end
+  
   return true, nil
 end
 
