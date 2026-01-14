@@ -8,6 +8,7 @@ local validation = require "mikro_taskwarrior.utils.validation"
 local window = require "mikro_taskwarrior.ui.window"
 
 ---@class Task
+---@field id number|nil Persistent task ID (1, 2, 3...)
 ---@field uuid string
 ---@field description string
 ---@field status "pending"|"completed"|"active"
@@ -23,12 +24,64 @@ local window = require "mikro_taskwarrior.ui.window"
 
 local M = {}
 
+---Assign IDs to pending tasks based on stable ordering (entry timestamp, then UUID)
+---This ensures IDs are 1, 2, 3... for all pending tasks when listing without filters
+---@param tasks Task[] All tasks
+---@return boolean modified Whether any tasks were modified
+local function assign_ids_to_pending_tasks(tasks)
+  -- Get all pending tasks
+  local pending_tasks = {}
+  for _, task in ipairs(tasks) do
+    if task.status ~= "completed" then
+      table.insert(pending_tasks, task)
+    end
+  end
+  
+  -- Sort by entry timestamp (descending), then UUID (descending) for stable ordering
+  -- This ensures newer tasks get lower IDs (1, 2, 3...)
+  table.sort(pending_tasks, function(a, b)
+    local entry_a = a.entry or ""
+    local entry_b = b.entry or ""
+    if entry_a ~= entry_b then
+      return entry_a > entry_b  -- Descending order (newer first)
+    end
+    -- Secondary sort by UUID (descending) for deterministic ordering
+    local uuid_a = a.uuid or ""
+    local uuid_b = b.uuid or ""
+    return uuid_a > uuid_b  -- Descending order
+  end)
+  
+  -- Assign sequential IDs (newest task gets ID 1)
+  local modified = false
+  for i, task in ipairs(pending_tasks) do
+    if task.id ~= i then
+      task.id = i
+      modified = true
+    end
+  end
+  
+  return modified
+end
+
 ---Get filtered and sorted tasks
 ---@param filter_tags string[]|nil Tags that must all be present
 ---@param exclude_tags string[]|nil Tags that must not be present
 ---@return Task[]
 local function get_filtered_tasks(filter_tags, exclude_tags)
   local tasks = storage.read_tasks()
+  
+  -- If no filters, ensure all pending tasks have IDs assigned
+  if not filter_tags or #filter_tags == 0 then
+    if not exclude_tags or #exclude_tags == 0 then
+      local modified = assign_ids_to_pending_tasks(tasks)
+      if modified then
+        storage.write_tasks(tasks)
+        -- Re-read to get updated tasks
+        tasks = storage.read_tasks()
+      end
+    end
+  end
+  
   local open_tasks = filter.filter_tasks(tasks, filter_tags, exclude_tags, "pending", true)
   filter.sort_tasks_by_urgency(open_tasks)
   return open_tasks
@@ -36,11 +89,10 @@ end
 
 ---Format a single task for detailed view
 ---@param task Task
----@param task_id number
 ---@return string[]
-local function format_task_detail_view(task, task_id)
+local function format_task_detail_view(task)
   local lines = {}
-  table.insert(lines, string.format("ID: %d", task_id))
+  table.insert(lines, string.format("ID: %d", task.id or 0))
   table.insert(lines, string.format("UUID: %s", task.uuid))
   table.insert(lines, string.format("Description: %s", task.description))
   table.insert(lines, string.format("Status: %s", task.status))
@@ -89,9 +141,7 @@ local function format_task_table(open_tasks, filter_tags, exclude_tags)
   local desc_width = math.floor(vim.o.columns * 0.8) - (id_width + urg_width + age_width + due_width + tags_width + 10)
 
   -- Header
-  local header = string_utils.pad_string("ID", id_width)
-    .. " "
-    .. string_utils.pad_string("Urg", urg_width)
+  local header = string_utils.pad_string("Urg", urg_width)
     .. " "
     .. string_utils.pad_string("Age", age_width)
     .. " "
@@ -99,19 +149,21 @@ local function format_task_table(open_tasks, filter_tags, exclude_tags)
     .. " "
     .. string_utils.pad_string("Tags", tags_width)
     .. " "
+    .. string_utils.pad_string("ID", id_width)
+    .. " "
     .. string_utils.pad_string("Description", desc_width)
   table.insert(lines, header)
 
   -- Separator line
-  local separator = string.rep("-", id_width)
-    .. " "
-    .. string.rep("-", urg_width)
+  local separator = string.rep("-", urg_width)
     .. " "
     .. string.rep("-", age_width)
     .. " "
     .. string.rep("-", due_width)
     .. " "
     .. string.rep("-", tags_width)
+    .. " "
+    .. string.rep("-", id_width)
     .. " "
     .. string.rep("-", desc_width)
   table.insert(lines, separator)
@@ -134,15 +186,17 @@ local function format_task_table(open_tasks, filter_tags, exclude_tags)
     local desc = task.description
     if #desc > desc_width then desc = desc:sub(1, desc_width - 3) .. "..." end
 
-    local row = string_utils.pad_string(tostring(i), id_width, "right")
-      .. " "
-      .. string_utils.pad_string(urg_str, urg_width, "right")
+    -- Use task.id if available, otherwise fall back to position
+    local display_id = task.id or i
+    local row = string_utils.pad_string(urg_str, urg_width, "right")
       .. " "
       .. string_utils.pad_string(age, age_width)
       .. " "
       .. string_utils.pad_string(due_str, due_width)
       .. " "
       .. string_utils.pad_string(tags_str, tags_width)
+      .. " "
+      .. string_utils.pad_string(tostring(display_id), id_width, "right")
       .. " "
       .. string_utils.pad_string(desc, desc_width)
     table.insert(lines, row)
@@ -174,12 +228,20 @@ function M.list_tasks(filter_tags, exclude_tags, task_id)
 
   -- If task_id is provided, filter to show only that task
   if task_id then
-    if task_id < 1 or task_id > #open_tasks then
+    local found_task = nil
+    for _, task in ipairs(open_tasks) do
+      if task.id == task_id then
+        found_task = task
+        break
+      end
+    end
+    
+    if not found_task then
       local lines = { string.format("Task ID %d not found.", task_id) }
       window.create_float_window(lines)
       return
     end
-    local lines = format_task_detail_view(open_tasks[task_id], task_id)
+    local lines = format_task_detail_view(found_task)
     window.create_float_window(lines)
     return
   end
@@ -229,7 +291,20 @@ function M.add_task(args)
   end
   
   local tasks = storage.read_tasks()
+  
+  -- Ensure all pending tasks have IDs assigned
+  assign_ids_to_pending_tasks(tasks)
+  
+  -- Find the maximum ID among pending tasks
+  local max_id = 0
+  for _, task in ipairs(tasks) do
+    if task.status ~= "completed" and task.id and task.id > max_id then
+      max_id = task.id
+    end
+  end
+  
   local new_task = {
+    id = max_id + 1,
     uuid = uuid_utils.generate_uuid(),
     description = description,
     status = "pending",
@@ -260,21 +335,21 @@ function M.mark_task_done_by_id(display_id)
   -- This ensures IDs are calculated consistently
   local open_tasks = get_filtered_tasks(nil, nil)
 
-  -- Check if display_id is valid
-  if not validation.is_valid_task_id(display_id, #open_tasks) then
+  -- Find task by stored ID
+  local target_task = nil
+  for _, task in ipairs(open_tasks) do
+    if task.id == display_id then
+      target_task = task
+      break
+    end
+  end
+
+  if not target_task or not target_task.uuid then
     print(string.format("Invalid task ID: %d", display_id))
     return
   end
 
-  -- Get the target task and verify it exists
-  local target_task = open_tasks[display_id]
-  if not target_task or not target_task.uuid then
-    print(string.format("Error: Task at ID %d is invalid", display_id))
-    return
-  end
-
   -- Safety check: Show which task is being marked as done
-  -- This helps catch cases where IDs have shifted
   local target_uuid = target_task.uuid
   local target_description = target_task.description or "Unknown"
   
@@ -355,10 +430,20 @@ local function find_tasks_to_modify(tasks, filter_tags, exclude_tags, task_id)
 
   -- If task_id is provided, only modify that specific task
   if task_id then
-    if task_id < 1 or task_id > #open_tasks then
+    local found_task = nil
+    local found_index = nil
+    for i, task in ipairs(open_tasks) do
+      if task.id == task_id then
+        found_task = task
+        found_index = open_tasks_indices[i]
+        break
+      end
+    end
+    
+    if not found_task then
       return nil, nil, string.format("Invalid task ID: %d", task_id)
     end
-    return { open_tasks[task_id] }, { open_tasks_indices[task_id] }, nil
+    return { found_task }, { found_index }, nil
   end
 
   return open_tasks, open_tasks_indices, nil

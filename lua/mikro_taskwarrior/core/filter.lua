@@ -1,6 +1,7 @@
 local urgency = require "mikro_taskwarrior.core.urgency"
 
 ---@class Task
+---@field id number|nil Persistent task ID (1, 2, 3...)
 ---@field uuid string
 ---@field description string
 ---@field status "pending"|"completed"|"active"
