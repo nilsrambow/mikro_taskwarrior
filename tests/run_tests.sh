@@ -29,38 +29,50 @@ echo ""
 # Count test files
 TEST_FILE_COUNT=$(grep -c "•.*_spec.lua" "$OUTPUT_FILE" 2>/dev/null || echo "0")
 
-# Parse plenary's test output more carefully
+# Parse plenary's test output more carefully.
 # Plenary outputs lines like:
-#   Pass    ||      Test description
+#   Success ||      Test description
 #   Fail    ||      Test description
-#   Errors :      0
+# and per-file summaries like:
+#   Success:      7
 #   Failed :      0
+#   Errors :      0
 
-# Count actual test failures (lines starting with "Fail" followed by "||")
-ACTUAL_FAILURES=$(grep -E "^[[:space:]]*Fail[[:space:]]+\|\|" "$OUTPUT_FILE" 2>/dev/null | wc -l | tr -d ' ')
-ACTUAL_FAILURES=${ACTUAL_FAILURES:-0}
+# Count actual test results from per-test lines (most reliable).
+# Plenary colorizes output, so we strip ANSI escape sequences before matching.
+PASSED_COUNT=$(
+  awk '
+    {
+      gsub(/\x1B\[[0-9;]*[A-Za-z]/, "", $0)
+      if ($1 == "Success" && $2 == "||") passed++
+    }
+    END { print passed+0 }
+  ' "$OUTPUT_FILE" 2>/dev/null
+)
+PASSED_COUNT=${PASSED_COUNT:-0}
 
-# Count actual test passes (lines starting with "Pass" followed by "||")
-ACTUAL_PASSES=$(grep -E "^[[:space:]]*Pass[[:space:]]+\|\|" "$OUTPUT_FILE" 2>/dev/null | wc -l | tr -d ' ')
-ACTUAL_PASSES=${ACTUAL_PASSES:-0}
+FAILED_COUNT=$(
+  awk '
+    {
+      gsub(/\x1B\[[0-9;]*[A-Za-z]/, "", $0)
+      if ($1 == "Fail" && $2 == "||") failed++
+    }
+    END { print failed+0 }
+  ' "$OUTPUT_FILE" 2>/dev/null
+)
+FAILED_COUNT=${FAILED_COUNT:-0}
 
-# Also check the summary lines from plenary (but exclude our own summary)
-PLENARY_FAILED_LINE=$(grep -E "^[[:space:]]*Failed[[:space:]]*:" "$OUTPUT_FILE" 2>/dev/null | head -1)
-PLENARY_FAILED=$(echo "$PLENARY_FAILED_LINE" | grep -oE "[0-9]+" | head -1)
-PLENARY_FAILED=${PLENARY_FAILED:-0}
-
-PLENARY_ERRORS_LINE=$(grep -E "^[[:space:]]*Errors[[:space:]]*:" "$OUTPUT_FILE" 2>/dev/null | head -1)
-PLENARY_ERRORS=$(echo "$PLENARY_ERRORS_LINE" | grep -oE "[0-9]+" | head -1)
+# Sum error counts from per-file summary lines (in case errors don't show as per-test lines)
+PLENARY_ERRORS=$(
+  awk '
+    {
+      gsub(/\x1B\[[0-9;]*[A-Za-z]/, "", $0)
+      if ($1 == "Errors" && $2 ~ /:/) sum += $NF
+    }
+    END { print sum+0 }
+  ' "$OUTPUT_FILE" 2>/dev/null
+)
 PLENARY_ERRORS=${PLENARY_ERRORS:-0}
-
-# Use actual counts if available, otherwise use plenary summary
-if [ "$ACTUAL_FAILURES" -gt 0 ]; then
-  FAILED_COUNT=$ACTUAL_FAILURES
-else
-  FAILED_COUNT=$PLENARY_FAILED
-fi
-
-PASSED_COUNT=$ACTUAL_PASSES
 
 echo "Test files processed: $TEST_FILE_COUNT"
 echo "Tests passed:        $PASSED_COUNT"

@@ -1,30 +1,39 @@
 local M = {}
 
--- Urgency coefficients (matching Taskwarrior defaults)
+-- Urgency coefficients.
+--
+-- NOTE: This plugin intentionally biases urgency to achieve a stable ordering:
+-- - Overdue tasks always sort above non-overdue tasks
+-- - Among due tasks: earlier due date => higher urgency
+-- - Tasks without a due date always sort after tasks with a due date
+-- - Tags/age/next only act as tiny tie-breakers (primarily within the same due date)
 local URGENCY = {
-  next_coefficient = 15.0,
-  due_coefficient = 12.0,
-  priority_coefficient = 6.0, -- H=6.0, M=3.9, L=1.8
-  active_coefficient = 4.0,
-  age_coefficient = 2.0,
+  -- Tiny tie-breakers
+  next_coefficient = 0.01,
+  tags_coefficient = 0.005,
+  age_coefficient = 0.005,
   age_max = 365, -- days
+
+  -- Due-date ordering driver
+  due_coefficient = 12.0,
+  due_present_boost = 1.0, -- Ensure any due task stays above non-due tasks
+  due_max = 7, -- days overdue when overdue urgency saturates (0 = no cap)
+  due_future_max = 365, -- days in the future after which due urgency bottoms out
+
+  -- Kept for potential future use (even if not currently applied)
   project_coefficient = 1.0,
-  tags_coefficient = 1.0,
-  annotations_coefficient = 1.0,
-  waiting_coefficient = -3.0,
   blocked_coefficient = -5.0,
-  due_max = 7, -- days overdue when urgency maxes out (can be configured)
 }
 
 -- Function to calculate urgency for a task
 function M.calculate_urgency(task)
   local urgency = 0.0
 
-  -- Tags coefficient (1.0 if task has any tags)
+  -- Tiny tie-breaker: any tags
   if task.tags and #task.tags > 0 then
     urgency = urgency + URGENCY.tags_coefficient
 
-    -- Next tag (15.0)
+    -- Tiny tie-breaker: next tag
     for _, tag in ipairs(task.tags) do
       if tag == "next" then
         urgency = urgency + URGENCY.next_coefficient
@@ -33,39 +42,41 @@ function M.calculate_urgency(task)
     end
   end
 
-  -- Due date coefficient - Using Taskwarrior's exact formula
+  -- Due date: drives primary ordering
   if task.due then
     local year, month, day = task.due:match "(%d%d%d%d)%-(%d%d)%-(%d%d)"
     if year then
       local due_time =
         os.time { year = tonumber(year), month = tonumber(month), day = tonumber(day), hour = 0, min = 0, sec = 0 }
-      local now = os.time()
-      local seconds_until_due = due_time - now
-      local days_until_due = seconds_until_due / 86400.0
+      local now = os.date "*t"
+      local today_time = os.time { year = now.year, month = now.month, day = now.day, hour = 0, min = 0, sec = 0 }
 
-      -- Taskwarrior formula:
-      -- days_overdue = (now - due) / 86400.0
-      -- So days_overdue = -days_until_due
+      -- Positive = due in the future, negative = overdue
+      local days_until_due = math.floor((due_time - today_time) / 86400)
       local days_overdue = -days_until_due
 
+      -- We intentionally use a step between overdue and non-overdue so
+      -- overdue tasks always sort above non-overdue tasks, regardless of tags/age.
       local due_factor
-      if URGENCY.due_max == 0 or days_overdue > URGENCY.due_max then
-        -- Overdue beyond max: full urgency
-        due_factor = 1.0
-      elseif days_overdue >= -14.0 then
-        -- Within 14 days before or overdue up to due_max days:
-        -- Linear scale from 0.2 (at -14 days) to 1.0 (at due_max days overdue)
-        due_factor = ((days_overdue + 14.0) * 0.8 / 21.0) + 0.2
+      if days_overdue > 0 then
+        local denom = (URGENCY.due_max and URGENCY.due_max > 0) and URGENCY.due_max or 1
+        local capped = (URGENCY.due_max and URGENCY.due_max > 0) and math.min(days_overdue, URGENCY.due_max)
+          or days_overdue
+        -- Overdue range: [2.0 .. 3.0] (or higher if due_max == 0)
+        due_factor = 2.0 + (capped / denom)
       else
-        -- More than 14 days away: minimum urgency
-        due_factor = 0.2
+        local future_max = URGENCY.due_future_max or 365
+        if future_max <= 0 then future_max = 1 end
+        local capped = math.min(math.max(0, days_until_due), future_max)
+        -- Non-overdue range: [1.0 (today) .. 0.0 (>= future_max days away)]
+        due_factor = (future_max - capped) / future_max
       end
 
-      urgency = urgency + URGENCY.due_coefficient * due_factor
+      urgency = urgency + (URGENCY.due_present_boost or 0.0) + URGENCY.due_coefficient * due_factor
     end
   end
 
-  -- Age coefficient (2.0, increases over time up to age_max)
+  -- Tiny tie-breaker: age (increases over time up to age_max)
   if task.entry then
     local year, month, day = task.entry:match "(%d%d%d%d)(%d%d)(%d%d)"
     if year then
@@ -76,9 +87,6 @@ function M.calculate_urgency(task)
       urgency = urgency + URGENCY.age_coefficient * age_factor
     end
   end
-
-  -- Active status (4.0) - we could track this if we add a "start" timestamp
-  if task.status == "active" then urgency = urgency + URGENCY.active_coefficient end
 
   return urgency
 end
